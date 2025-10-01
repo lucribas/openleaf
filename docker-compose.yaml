@@ -1,0 +1,48 @@
+services:
+
+  mongo:
+    image: mongo:6
+    restart: unless-stopped
+    command: ["mongod", "--replSet=rs0", "--bind_ip_all"]
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+  overleaf:
+    build: docker/.
+    depends_on: [mongo, redis]
+    environment:
+      OVERLEAF_SITE_URL: "http://localhost:8080"
+      OVERLEAF_MONGO_URL: "mongodb://mongo/overleaf?replicaSet=rs0&retryWrites=true&w=majority"
+      OVERLEAF_REDIS_HOST: "redis"
+      OVERLEAF_APP_NAME: "Overleaf CE"
+      OVERLEAF_LOG_LEVEL: "info"
+    ports:
+      - "8080:80"
+    volumes:
+      - overleaf_data:/var/lib/overleaf
+
+  mongo-init:
+    image: mongo:6
+    depends_on: [mongo]
+    restart: "no"
+    entrypoint: ["/bin/sh","-c"]
+    command: >
+      "until mongosh --host mongo --quiet --eval 'db.adminCommand(\"ping\").ok' >/dev/null 2>&1; do sleep 1; done &&
+      mongosh --host mongo --eval 'try{rs.status()}catch(e){rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongo:27017\"}]})}'"
+
+volumes:
+  mongo_data:
+  redis_data:
+  overleaf_data:
